@@ -1,0 +1,155 @@
+---
+alwaysApply: true
+---
+BugTime AI — P2: Find the Breaking Commit
+Implement P2 on top of the existing P0/P1 application and redesigned UI. Read the existing project instructions and reuse its execution worker, sandbox, database, activity events, and test-result components.
+1. Goal
+Given:
+- An investigation with a developer-confirmed reproduction.
+- Its pinned failing commit.
+- A user-selected candidate good commit.
+- One selected reproduction test.
+Find and verify the commit where that test changes from passing to exhibiting the reported failure.
+The result must include commit metadata, the relevant diff, and execution evidence.
+2. Initial scope
+Support Python/pytest repositories and a linear ancestry path between good and bad commits.
+Validate that the good commit is an ancestor of the bad commit. If the interval contains merge commits, display “Merge history is not supported in this milestone.”
+Search assumes the bug was introduced once within the selected range. State this assumption in the setup and report; do not claim that bisect proves there were no intermediate fixes and reintroductions.
+3. Setup flow
+Add Find breaking commit to investigations with a confirmed reproduction.
+Open a setup drawer containing:
+Field	Behavior
+Bad commit	Fixed to the investigation’s pinned SHA
+Candidate good commit	Select from repository history or enter a SHA
+Reproduction test	Choose one developer-confirmed failing test
+Failure matcher	Review the expected exception type and stable assertion/message fragment
+Limits	Default 20 distinct commits, 30 executions, 10 minutes overall
+
+
+Resolve abbreviated SHAs to full SHAs before saving.
+The good commit is a candidate until execution verifies it.
+4. Keep the reproduction test consistent
+Historical tests may change or disappear. Create an immutable reproduction bundle from the confirmed failing revision:
+- Selected test file.
+- Required test-only fixtures and helper files.
+- Selected pytest node identifier.
+- Failure-matching configuration.
+- Bundle content hash.
+Replay that bundle unchanged against each historical application revision. Apply it only within a disposable checkout, and record which test files it overlays.
+Do not copy application source from the failing revision into older checkouts.
+If fixtures cannot be separated from application code or the test cannot run against an older interface, classify that revision as untestable with an explanation.
+5. Validate both endpoints
+Before searching:
+1. Run the frozen reproduction bundle twice at the candidate good commit.
+2. Run it twice at the pinned bad commit.
+3. Require both good runs to pass.
+4. Require both bad runs to exhibit the configured target failure.
+If repeated outcomes differ, stop with “Inconsistent reproduction.”
+If the good commit fails or the bad commit passes, stop with “Invalid search range.”
+Two consistent executions are a practical check, not proof that a test is never flaky.
+6. Search behavior
+Use Git bisect in an isolated workspace.
+Classify each execution as:
+Classification	Meaning
+good	Selected test executed and passed
+bad	Selected test failed with the configured target failure
+skip	Missing dependencies, collection errors, missing test, unrelated failure, timeout, or incompatible environment
+abort	User cancellation, exhausted overall budget, or execution infrastructure failure
+
+
+Use an explicit adapter. Do not pass raw pytest exit codes directly to Git. Git’s bisect runner interprets 0 as good, 125 as skip, and most other small nonzero codes as bad. git-bisect Documentation
+Additional requirements:
+- Keep the runner image digest and reproduction bundle fixed.
+- Reuse P1’s isolation and resource limits.
+- Persist each tested SHA, outcome, reason, logs, and duration.
+- Keep checkout operations separate from the shared indexed repository.
+- Do not restrict the bisect range to files retrieved by RAG.
+- Use retrieved evidence to highlight relevant files in the resulting diff.
+- If skipped commits leave several candidates, report all candidates as inconclusive.
+7. Verify the boundary
+When Git identifies a candidate:
+- Execute the reproduction twice at the candidate.
+- Execute it twice at its immediate parent.
+- Require the parent to pass both times.
+- Require the candidate to exhibit the target failure both times.
+Only then display:
+“Verified failure boundary”
+Supporting text:
+The reproduction passes at the parent and fails at this commit under the recorded environment.
+
+If verification fails or the parent is untestable, preserve the candidate and report an inconclusive result.
+This establishes a behavioral boundary; identifying the exact faulty line remains a separate analysis step.
+8. UI
+Add a Commits tab to the investigation workspace.
+During execution:
+- Good and bad endpoint SHAs.
+- Current stage.
+- Tested/remaining candidate counts where known.
+- Elapsed time and remaining budget.
+- Cancel action.
+- Chronological commit list with Good, Target failure, Skipped, or Testing labels.
+- Selecting a commit opens its execution evidence.
+After completion:
+- Outcome banner.
+- Candidate commit SHA, author, date, and message.
+- Pinned GitHub commit link.
+- Parent-versus-candidate verification results.
+- Monaco diff viewer with changed-file navigation.
+- Highlight files also present in retrieved evidence.
+- Expandable full execution history.
+- Export report action.
+Enable this history diff view independently of the future patch-generation feature. Keep generated patches under the later Changes workflow.
+Use text and icons alongside color.
+9. Persistence
+Add these models or equivalent structures consistent with the existing code:
+Model	Required data
+CommitSearch	Investigation, confirmed execution, endpoint SHAs, bundle ID, image digest, status, outcome, budgets, candidate SHA(s), timestamps, error
+ReproductionBundle	Selected node ID, file manifest, artifact location, content hash, failure matcher
+CommitSearchStep	Search ID, SHA, phase, classification, classification reason, attempt, execution ID
+CommitMetadata	Repository, SHA, parent SHAs, author, date, subject
+
+
+Separate job status from investigation outcome.
+Statuses: queued, validating, searching, verifying, completed, failed, cancelled, timed_out.
+Outcomes: verified_boundary, inconclusive, invalid_range, inconsistent_reproduction, unsupported_history, budget_exhausted.
+A retry creates a new search record and preserves previous evidence.
+After worker interruption, retain completed steps and mark the run interrupted/retriable. Clean up orphaned containers and workspaces.
+10. API additions
+Under /api/v1:
+Method	Endpoint	Purpose
+GET	/repositories/{id}/commits	Paginated history anchored to a supplied SHA
+POST	/investigations/{id}/commit-searches	Validate input and queue search
+GET	/investigations/{id}/commit-searches	List searches
+GET	/commit-searches/{id}	Progress and result
+GET	/commit-searches/{id}/steps	Tested revisions and execution links
+GET	/commit-searches/{id}/diff	Candidate versus parent diff
+POST	/commit-searches/{id}/cancel	Cancel search and active execution
+GET	/commit-searches/{id}/report	Download Markdown report
+
+
+Reject concurrent searches for the same investigation with a clear conflict response.
+11. Demo fixture
+Add a versioned demo repository with at least eight linear commits:
+- An early revision with working mixed-case login.
+- Several unrelated changes.
+- One intentional regression.
+- Further unrelated changes.
+Keep the expected introducing SHA in test-fixture metadata only. The search implementation must discover it through execution.
+Create a new demo fixture version so existing P0/P1 investigation history remains valid.
+12. Acceptance criteria
+P2 is complete when:
+1. The demo search finds the known introducing commit without hardcoded search results.
+2. Endpoint validation confirms a passing good commit and matching failing bad commit.
+3. The same reproduction-bundle hash and runner image are used throughout.
+4. The candidate’s parent passes and the candidate fails during final verification.
+5. An unrelated test failure is skipped, not classified as the target bug.
+6. Missing dependencies, missing tests, and collection errors cannot produce false verification.
+7. Skipped revisions that prevent a unique result produce an inconclusive candidate list.
+8. Invalid ancestry and merge history produce clear explanations.
+9. Cancellation, timeouts, and execution budgets clean up resources.
+10. Branch movement does not change the pinned search.
+11. Results and logs survive page refresh and service restart.
+12. The diff, report, and GitHub links refer to the exact recorded SHAs.
+13. P0 indexing, P1 reproduction, and dashboard outcomes still work.
+14. Build, lint, focused backend tests, and the full demo flow pass.
+Deliver the implementation, migrations, updated README, and real verification output: good SHA, bad SHA, discovered commit, parent/candidate test results, and number of executions.

@@ -1,0 +1,111 @@
+---
+alwaysApply: true
+---
+BugTime AI — P4: Train and Evaluate a Code-Evidence Reranker
+Read the existing project instructions and reuse the current retrieval pipeline.
+1. Goal
+Train a small model that scores:
+Bug report + candidate code snippet → relevance score
+Use it to rerank retrieved evidence before patch generation.
+Start with a small Sentence Transformers cross-encoder, such as cross-encoder/ms-marco-MiniLM-L6-v2. Verify its model card, license, and hardware requirements before downloading. Cross-encoders score query/document pairs and support supervised reranking training. Sentence Transformers documentation
+Fine-tuning this small model is sufficient for P4; LoRA is optional.
+2. Build P4 in two stages
+P4A: dataset, baseline evaluation, and training infrastructure.
+P4B: actual training, held-out evaluation, and optional activation.
+The existing login demo is a smoke test. One successful repair does not provide enough independent examples to demonstrate generalization.
+3. Dataset
+Add versioned JSONL import/export with:
+Field	Purpose
+example_id	Stable identifier
+bug_group_id	Groups related reports and variants
+repository_id	Repository identity
+commit_sha	Pre-fix source version
+query	Bug report available before investigation
+file_path / line_range	Candidate location
+snippet	Source at the recorded commit
+label	Relevant, irrelevant, or unreviewed
+label_source	Human review or weak automatic label
+source_reference	Provenance and usage/license information
+split	Train, validation, or test
+
+
+Rules:
+- Use only pre-fix code as model input.
+- Exclude generated diagnoses, fix explanations, and post-fix content from queries.
+- Changed files from verified fixes may suggest positive labels; require review.
+- Unchanged files are not automatically irrelevant.
+- Keep unreviewed examples out of supervised training.
+- Deduplicate near-identical reports and snippets.
+- Keep related examples and forks in the same split.
+- Split by repository where sufficient independent repositories exist.
+- If only within-repository evaluation is possible, label it explicitly.
+Support user-provided datasets and explicitly selected public sources. Preserve provenance.
+4. Baseline evaluation
+Compare three configurations:
+1. Existing hybrid retrieval.
+2. Hybrid retrieval plus the unmodified cross-encoder.
+3. Hybrid retrieval plus the fine-tuned cross-encoder.
+Freeze the candidate pool per bug for comparisons.
+Retrieve up to 50 chunks, apply the selected reranker, then retain the existing evidence limits.
+Measure:
+- Candidate recall: proportion of labeled relevant files present before reranking.
+- Hit@1 and Hit@5: whether a relevant file appears in the first one/five positions.
+- MRR@10: reciprocal rank of the first relevant file.
+- Retrieval and reranking latency, including median and p95.
+Deduplicate by file for file-level metrics and document the chunk-to-file aggregation rule.
+Do not insert missing positive examples into evaluation candidates. A reranker cannot recover a file that retrieval never returned.
+5. Training
+Provide reproducible commands for:
+- Dataset validation.
+- Baseline evaluation.
+- Training.
+- Checkpoint evaluation.
+Record:
+- Dataset hash and split manifest.
+- Base-model revision.
+- Random seed.
+- Hyperparameters and dependency versions.
+- Hardware and duration.
+- Validation-selected checkpoint.
+Use validation data for checkpoint selection. Keep the test split untouched until final evaluation. Cross-encoders can overfit quickly, making validation-based checkpoint selection important. Sentence Transformers documentation
+Check CPU/GPU/MPS availability and use supported settings. If training cannot run, report the limitation and retain runnable commands; do not claim fine-tuning completed.
+6. Integration
+Add configuration:
+RERANKER_MODE=disabled
+RERANKER_MODEL_PATH=
+RERANKER_CANDIDATE_LIMIT=50
+
+Supported modes:
+- disabled: existing ranking.
+- base: pretrained cross-encoder.
+- finetuned: local trained checkpoint.
+Record the mode and checkpoint hash on each investigation.
+If reranking fails, fall back to existing ranking and record the fallback. Historical evidence must remain unchanged.
+7. Evaluation UI
+Add an Evaluations page containing:
+- Dataset versions, counts, provenance, and split sizes.
+- Training-run status.
+- Comparison table for all three configurations.
+- Per-bug ranking comparisons.
+- Missed relevant files and retrieval failures.
+- Checkpoint metadata and report download.
+- Activation control for an evaluated checkpoint.
+Show real results only. Small or synthetic evaluations must carry those labels.
+8. Promotion rule
+Keep fine-tuning experimental by default.
+Promote a checkpoint only when held-out results show useful improvement over the strongest existing baseline, with acceptable latency.
+Report bug counts, repository counts, and uncertainty alongside metric differences. A worse or inconclusive result is a valid experiment outcome; preserve the better baseline.
+9. Acceptance criteria
+P4A
+- Dataset validation catches missing provenance, invalid labels, and split leakage.
+- Current retrieval and pretrained-reranker baselines run reproducibly.
+- Per-bug results and aggregate metrics agree.
+- Existing P0–P3 flows still pass.
+P4B
+- A real training job changes model weights and saves a loadable checkpoint.
+- Held-out comparison uses the same candidate pools.
+- The report includes dataset size, split strategy, metrics, latency, and limitations.
+- Fine-tuned inference works in a new investigation.
+- Fallback works when the checkpoint is unavailable.
+- No improvement is fabricated or required merely to mark the experiment complete.
+Start with P4A. Inventory the available independent bug examples, implement the dataset/evaluation pipeline, and report whether the data supports a meaningful P4B experiment.

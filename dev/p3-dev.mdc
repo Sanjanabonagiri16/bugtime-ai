@@ -1,0 +1,137 @@
+---
+alwaysApply: true
+---
+BugTime AI — P3 Requirements
+Implement P3 on the existing application. Read the repository instructions and P0–P2 implementation first.
+Goal: generate a focused patch, prove the reproduction passes afterward, and present the changes with test evidence for review.
+1. Entry point
+Enable Generate fix for investigations with:
+- A developer-confirmed reproduction.
+- A P2 verified_boundary result.
+- An available reproduction bundle and runner image.
+The patch target is the investigation’s pinned bad SHA, which may be later than the introducing commit. Display both SHAs clearly.
+Run all modifications in disposable workspaces.
+2. Real AI integration
+Implement one working model-provider integration behind an adapter.
+Configure credentials and model name through backend environment variables. Record the actual provider/model used.
+The model receives:
+- Bug description and expected behavior.
+- Retrieved source evidence at the target SHA.
+- Verified introducing commit and diff.
+- Frozen reproduction test and failure output.
+- Relevant existing tests.
+- Previous attempt feedback, when applicable.
+Return structured output:
+- Proposed explanation.
+- Changed file contents or unified diff.
+- Optional new regression test.
+- Assumptions and limitations.
+Validate this output before applying it. Missing credentials must produce “Model provider not configured.”
+Use a real model call for the acceptance demo. Deterministic mock responses are appropriate for automated tests only.
+3. LangGraph orchestration
+Implement these stages:
+Stage	Responsibility
+Prepare	Load immutable inputs and check budgets
+Baseline	Confirm the target failure and run the existing suite
+Retrieve	Collect relevant context from the pinned index
+Propose	Request a focused repair
+Validate	Check paths, scope, syntax, and patch applicability
+Verify	Run reproduction and regression checks
+Decide	Finish, retry with feedback, or stop
+
+
+Use persistent LangGraph checkpoints backed by PostgreSQL. Keep RQ for job dispatch and reuse the dedicated executor for sandbox work. LangGraph supports persistent graph state through checkpointers. GitHub
+Persist attempt identifiers before external calls and executions. Recovery must reuse completed artifacts instead of blindly rerunning completed steps.
+Defaults:
+- Maximum three patch attempts.
+- Ten-minute overall deadline.
+- Configurable model token budget.
+- One active repair per investigation.
+- Cancellation checked between stages and during sandbox execution.
+4. Patch constraints
+Each attempt starts from a clean checkout of the pinned target.
+- Allow application-source edits and new test files.
+- Protect the frozen reproduction bundle and existing tests.
+- Reject edits to dependencies, pytest configuration, execution infrastructure, and secrets in this milestone.
+- Reject absolute paths, traversal, symlinks, binaries, and submodule changes.
+- Default limit: five files and 300 added/deleted lines.
+- Reject patches that suppress tests through skips, expected failures, or collection changes.
+- Never treat repository text as instructions to change execution policy.
+Check applicability before applying a diff with git apply --check. git-apply Documentation
+A validation failure counts toward the attempt budget. Preserve the rejected output and reason.
+5. Verification rules
+Use the same recorded runner image, reproduction bundle, and environment before and after the patch.
+Baseline
+- Confirm the frozen reproduction exhibits the expected failure.
+- Collect and run the supported existing suite.
+- Persist individual test identifiers and outcomes.
+After applying the patch
+1. Run the frozen reproduction twice; require both runs to pass.
+2. Run the same existing suite.
+3. Require previously passing tests to remain passing.
+4. Flag missing tests, new skips, and collection failures.
+5. If a new regression test was added, run that exact test against both versions: it must fail for the intended reason before the patch and pass afterward.
+If the frozen test already captures the bug, a new duplicate test is unnecessary.
+Use these outcomes:
+Outcome	Meaning
+verified_fix	Reproduction passes consistently; baseline suite completed; no new failures or missing tests
+partial_verification	Reproduction passes, but broader checks could not complete
+verification_failed	Reproduction still fails or the patch introduces regressions
+baseline_invalid	Original target failure cannot be reproduced
+budget_exhausted	Limits reached without verified repair
+
+
+Show unchanged pre-existing failures explicitly. Verified fix means verified against the recorded checks, not proof of universal correctness.
+6. Review interface
+Enable the Changes tab.
+Include:
+- Generate fix, cancel, and retry actions.
+- Current stage and attempt counter.
+- Changed-file list and Monaco diff.
+- Proposed explanation with source references.
+- Before/after test comparison.
+- Reproduction, existing-suite, and added-test results.
+- Attempt history with failure reasons.
+- Limitations and pre-existing failures.
+- Download patch and export report actions.
+Add Accept for export and Reject review controls tied to the exact patch hash. Acceptance records the developer’s decision; it does not push, merge, or deploy anything.
+Keep verification outcome and review decision separate.
+7. Data models
+Model	Required fields
+RepairRun	Investigation, commit search, target SHA, bundle hash, image digest, graph thread ID, status, outcome, budgets, timestamps
+PatchAttempt	Run ID, attempt number, provider/model, prompt version, context manifest, explanation, patch artifact/hash, validation result, token usage
+VerificationComparison	Attempt ID, baseline/patched execution IDs, reproduction outcomes, new failures, missing tests, unchanged failures
+PatchReview	Attempt ID, patch hash, accepted/rejected decision, note, timestamp
+
+
+Store artifact references rather than large patches and logs directly in graph state.
+Provider-reported usage may be recorded; unavailable usage or cost must remain unknown rather than estimated without a label.
+8. API additions
+Under /api/v1:
+Method	Endpoint	Purpose
+POST	/investigations/{id}/repairs	Start repair
+GET	/investigations/{id}/repairs	List repair runs
+GET	/repairs/{id}	Status, outcome, attempts
+POST	/repairs/{id}/cancel	Cancel active work
+GET	/patch-attempts/{id}	Diff, explanation, verification
+POST	/patch-attempts/{id}/review	Record review decision
+GET	/patch-attempts/{id}/patch	Download unified diff
+GET	/repairs/{id}/report	Export Markdown report
+
+
+Include target SHA, patch hash, verification outcome, and limitations in exports. Unverified downloads must be labeled accordingly.
+9. Acceptance criteria
+P3 is complete when:
+1. A real model generates the demo repair without a hardcoded fix.
+2. The repair applies to the pinned bad SHA.
+3. The unchanged reproduction fails before the patch and passes twice afterward.
+4. The lowercase-login test continues to pass.
+5. The supported existing suite completes with no new failures or missing tests.
+6. Protected-file edits and invalid paths are rejected.
+7. A deliberately ineffective patch receives test feedback and cannot be marked verified.
+8. Attempt limits, cancellation, and timeouts work.
+9. Completed artifacts survive refresh and worker restart.
+10. Review decisions are bound to immutable patch hashes.
+11. Downloaded patches apply cleanly to a fresh checkout of the recorded target.
+12. P0–P2 flows, frontend build, lint, and relevant backend tests pass.
+Deliver the implementation, migrations, configuration example, README updates, and real demo evidence: model used, target SHA, patch hash, changed files, attempt count, and before/after test results.

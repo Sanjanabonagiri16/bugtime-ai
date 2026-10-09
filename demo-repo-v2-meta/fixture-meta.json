@@ -1,0 +1,8 @@
+{
+  "version": "v2",
+  "expected_breaking_sha": "7d424871fca4622a0374221d6f0bf408ef5e2c17",
+  "suggested_good_sha": "ee99678d7c3c2ee7b434ef327154e2b7768b5557",
+  "head_sha": "cb2c06309a559955018ebf749fdf3f086e95070a",
+  "reproduction_test": "tests/test_auth.py::test_login_mixed_case_should_succeed",
+  "note": "Search must discover expected_breaking_sha via execution; do not hardcode in product code."
+}

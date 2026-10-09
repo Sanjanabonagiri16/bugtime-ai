@@ -1,0 +1,95 @@
+---
+alwaysApply: true
+---
+
+BugTime AI — P1: Bug Reproduction
+Extend the existing P0 application. Keep its stack and UI conventions.
+Goal
+From an investigation with retrieved evidence, let the developer select an existing pytest test, run it against the pinned repository commit, and inspect the results.
+P1 supports existing tests. AI-generated reproduction tests come after this execution foundation works.
+Features
+1. Test discovery
+   - Collect pytest test identifiers inside the sandbox.
+   - Display test file, test name, and collection errors.
+   - Prioritize tests whose files appear in retrieved evidence.
+   - Let the developer select one or more tests.
+2. Reproduction execution
+   - Add Run reproduction to the investigation workspace.
+   - Create a fresh checkout at the investigation’s pinned commit.
+   - Run selected tests using structured arguments, without shell interpolation.
+   - Capture stdout, stderr, exit code, duration, and pytest JUnit XML.
+   - Persist results independently of the worker/container lifecycle.
+3. Progress and cancellation
+   - Stages: queued → preparing → collecting → running → finished.
+   - Stream or poll actual execution output.
+   - Support cancellation and a configurable timeout.
+   - Terminate the container on cancellation or timeout.
+4. Failure relevance
+   - A failing test initially means “Failure observed.”
+   - Let the developer mark a failure as matching the reported bug, with a short explanation.
+   - Only then display “Bug reproduced — developer confirmed.”
+   - Passing tests mean “Selected tests passed,” not “No bug exists.”
+Execution environment
+Use disposable Docker containers with:
+- Non-root execution.
+- Network disabled during collection and test execution.
+- Default limits: 1 CPU, 1 GB RAM, 128 processes, 120-second execution timeout.
+- Writable temporary checkout; read-only container root filesystem where practical.
+- No application credentials or Docker socket inside the test container.
+- Automatic cleanup after completion, failure, cancellation, or timeout.
+Docker provides explicit resource constraints and a none network mode for these controls. Docker Docs
+For the first release, use a prebuilt Python/pytest image supporting the bundled demo and dependency-compatible repositories. Show “Environment setup unsupported” for missing dependencies. Arbitrary dependency installation is a later extension.
+Keep Docker access restricted to the dedicated execution worker.
+UI changes
+Enable the existing Tests tab.
+Include:
+- Discover tests button.
+- Searchable test selector.
+- Run and cancel actions.
+- Execution stage and elapsed time.
+- Passed / failed / skipped counts.
+- Failed-test details and assertion traceback.
+- Expandable terminal output.
+- Previous attempts.
+- Bug-match confirmation control and explanation field.
+Keep Changes disabled until patch generation is implemented.
+Data models
+Add:
+Model	Fields
+ExecutionRun	ID, investigation ID, pinned SHA, run type, selected test identifiers, runner image digest, status, exit code, timestamps, duration, error category
+TestResult	ID, execution ID, test identifier, outcome, duration, failure message, traceback
+ExecutionArtifact	ID, execution ID, type, storage location, byte size, truncation flag
+ReproductionConfirmation	ID, execution ID, matching failed-test identifiers, explanation, created time
+
+
+Run types: collection, reproduction.
+Execution statuses: queued, preparing, running, completed, failed, cancelled, timed_out.
+Separate execution status from test outcome: a completed run can contain failing tests.
+API additions
+Under /api/v1:
+Method	Endpoint	Action
+POST	/investigations/{id}/test-discovery	Queue test collection
+POST	/investigations/{id}/executions	Queue selected tests
+GET	/investigations/{id}/executions	List attempts
+GET	/executions/{id}	Status and results
+GET	/executions/{id}/output	Paginated output
+POST	/executions/{id}/cancel	Cancel active execution
+POST	/executions/{id}/confirmation	Confirm a failure matches the bug
+
+
+Validate selected identifiers against collected tests for the same pinned commit.
+Result handling
+Distinguish assertion failures from collection errors, interrupted execution, invalid commands, internal errors, and no tests collected. Interpret exit codes using the installed pytest version’s documented behavior. pytest documentation
+Never fabricate test results. Preserve partial output when execution fails.
+Acceptance criteria
+P1 is complete when:
+1. The demo’s seeded bug produces a real failing test with the expected assertion.
+2. A known passing test produces a passing result.
+3. Tests execute at the pinned SHA even after the repository branch advances.
+4. Missing dependencies and collection errors are reported separately from bug failures.
+5. Timeout and cancellation terminate execution and clean up containers.
+6. Logs and results survive page refresh and service restart.
+7. A failed test requires explicit bug-match confirmation before showing “Bug reproduced.”
+8. Existing P0 flows remain functional.
+9. Frontend build, lint, backend tests, and the demo reproduction flow pass.
+Deliver the implementation, migrations, runner configuration, updated README, and the actual demo execution results. Stop P1 at verified reproduction; commit investigation is P2.

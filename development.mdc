@@ -1,0 +1,107 @@
+---
+alwaysApply: true
+---
+
+Let’s choose BugTime: an AI debugging platform that traces a bug from its symptom to the commit that introduced it, then proposes and tests a fix.
+
+The signature demo: submit a broken login flow → reproduce the failure → identify the breaking commit → generate a patch → show passing tests.
+
+One stack detail: Web3.js is an Ethereum integration library, and it was sunset in March 2025. I’ll include it as an optional report-verification module, since you requested it. The main interface will use React/Next.js. 
+
+What the product does
+A developer connects a repository and submits a bug description, stack trace, or failing test. BugTime investigates in an isolated environment and returns:
+
+A reproducible failure, when possible.
+Relevant files and code references.
+The likely breaking commit, with evidence.
+A proposed patch and regression test.
+Test results and a downloadable investigation report.
+It must distinguish “suspected cause” from “verified cause.” If it cannot reproduce a bug or reliably identify the commit, the interface should show that clearly.
+
+The user journey
+Add a repository: GitHub URL, branch, and supported test command.
+Describe the bug: expected behavior, actual behavior, and optional logs.
+Start investigation: follow progress and inspect retrieved evidence.
+Review findings: reproduction result, likely cause, and commit history.
+Review the patch: compare code changes and test results.
+Export: download the patch/report; later, create a PR after approval.
+How RAG, orchestration, and fine-tuning fit
+Component	Its actual job
+RAG	Retrieve relevant functions, tests, documentation, issues, and commit diffs. Combine semantic search with exact symbol/text search.
+Orchestrator	Decide which investigation step runs next, manage retries, track evidence, and stop when the budget is exhausted.
+Fine-tuning	Train a smaller model to rank likely relevant files from a bug description, using historical issue-to-fix examples.
+Execution tools	Run Git commands, reproduce failures, apply patches, and execute tests inside isolated containers.
+Fine-tuning comes after a working baseline. We’ll compare file-ranking quality and investigation success before and after training, using held-out repositories to reduce data leakage.
+
+Investigation workflow
+Stage	Action	Evidence produced
+Intake	Parse the report and repository setup	Structured bug description
+Retrieval	Find relevant code and history	File references and candidate commits
+Reproduction	Create or run a failing test	Failure output
+Commit investigation	Test candidate commits; use Git bisect when a reliable good/bad test exists	Suspected or verified breaking commit
+Repair	Generate a focused patch and regression test	Reviewable diff
+Verification	Run the reproduction test and relevant existing tests	Results, failures, and limitations
+Review	Assemble findings for the developer	Investigation report
+Use LangGraph to coordinate this workflow and persist checkpoints so interrupted investigations can resume. Its documentation supports checkpoint-based persistence. 
+
+UI direction
+A professional developer workspace: moderately detailed, readable, and restrained.
+
+Think familiar repository navigation, a useful investigation dashboard, and a clear code-review workspace.
+
+Screen	Main content
+Dashboard	Repository list, recent investigations, status, and “New investigation” button
+Repository	Branch, indexing status, detected framework, test configuration
+New investigation	Bug description, expected/actual behavior, logs, branch selection
+Investigation workspace	Progress timeline, findings, evidence, logs, and patch
+History	Searchable previous runs with outcomes and duration
+Settings	Model configuration, execution limits, integrations
+Investigation workspace layout:
+
+Left sidebar: repository navigation and previous runs.
+Main area: findings with tabs for Overview, Evidence, Changes, and Tests.
+Right panel: current step, elapsed time, and execution budget.
+Expandable bottom panel: terminal output.
+Visual choices:
+
+Slate backgrounds, slightly lighter panels, blue primary actions.
+Green for passing tests, amber for uncertainty, red for failures.
+Readable typography; monospace for code and logs.
+Subtle borders and short transitions.
+Proper empty, loading, partial-result, and error states.
+Light/dark mode, with dark mode as the initial default.
+Web3.js integration
+An optional “Verify report” feature:
+
+Generate a hash of the finalized investigation report.
+Let the user record that hash through a small smart contract.
+Later, compare a report’s hash against the recorded value.
+Keep source code and logs off-chain. This proves that a report matches the recorded version; it does not prove that the diagnosis is correct.
+
+Start on a local development chain. Wallet connection appears only inside this feature, so ordinary debugging stays straightforward. Because Web3.js is sunset, keep this integration isolated and replaceable.
+
+Proposed stack
+Layer	Choice
+Frontend	Next.js, React, TypeScript
+UI	Tailwind CSS, shadcn/ui, Monaco diff editor
+Backend	FastAPI
+Orchestration	LangGraph
+Retrieval	Qdrant + exact code search + Git history
+Database	PostgreSQL
+Execution	Isolated Docker workers with resource/time limits
+Live progress	Server-Sent Events
+Fine-tuning	Hugging Face PEFT/LoRA
+Blockchain module	Web3.js + small Solidity contract
+Cursor is our development environment for implementing these pieces. The deployed application runs its own backend, models, and workers.
+
+Build priorities
+Priority	Deliverable	Completion check
+P0 — Working foundation	UI, repository import, indexing, investigation records	A supported repository loads and relevant code can be retrieved
+P1 — Bug reproduction	Sandbox runner, failing-test capture, live progress	A seeded bug is reproduced with visible evidence
+P2 — Commit investigation	History retrieval and conditional Git bisect	A known regression is traced to its introducing commit
+P3 — Repair and verification	Patch generation, regression tests, diff review	The failure test passes after the patch and relevant tests remain green
+P4 — Fine-tuning	Training dataset, file-ranking adapter, evaluation	Measured comparison against the baseline
+P5 — Integrations	PR creation and Web3.js report verification	Reviewed patch can be exported; report hash can be verified
+First release scope: Python repositories using pytest, one repository per investigation, and a bounded number of repair attempts. That gives us a complete, testable workflow before expanding to JavaScript, monorepos, and multiple services.
+
+Our first build target is P0: the dashboard, repository setup, investigation form, and evidence workspace backed by real repository indexing.

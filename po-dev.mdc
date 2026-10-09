@@ -1,0 +1,305 @@
+---
+alwaysApply: true
+---
+BugTime AI — P0 Requirements
+1. Goal
+Build the foundation of BugTime AI, an AI debugging platform.
+Tagline: Trace the bug. Find the breaking commit. Verify the fix.
+P0 must let a developer:
+1. Import a public GitHub repository.
+2. Index supported source files at a specific commit.
+3. Submit a bug report.
+4. Retrieve relevant code and documentation.
+5. Inspect evidence with file paths, line numbers, and source links.
+6. Reopen previous investigations.
+P0 finishes at “Evidence ready.” Bug reproduction, breaking-commit verification, patch generation, and test execution belong to later milestones.
+2. Technology
+Layer	Requirement
+Frontend	Next.js App Router, React, TypeScript
+Styling	Tailwind CSS and shadcn/ui
+Icons	Lucide
+Code viewer	Monaco Editor, read-only
+Backend	FastAPI, Python
+Relational database	PostgreSQL, SQLAlchemy, Alembic
+Vector search	Qdrant
+Background jobs	Redis and RQ worker
+Embeddings	Configurable sentence-transformers model; default all-MiniLM-L6-v2
+Local environment	Docker Compose
+
+
+Use supported stable package versions and commit lockfiles.
+Use Next.js Route Handlers only where necessary for frontend-to-backend proxying. Qdrant queries must filter by repository and index version; its payload filtering supports this separation. Next.js
+Web3.js: reserved for a later optional report-hash verification module. P0 requires no wallet connection or blockchain transaction.
+3. Scope and constraints
+- Single-user, local development application.
+- Public GitHub repositories only.
+- Import the default branch or a user-specified branch.
+- Resolve and store the exact commit SHA before indexing.
+- Prioritize Python source, pytest tests, and Markdown documentation.
+- Index .py, .md, .txt, .toml, .yaml, .yml, and .json.
+- Skip binaries, symlinks, generated folders, dependencies, lockfiles, .env files, and credential files.
+- Default limits: 2,000 eligible files, 256 KB per file, 20 MB total indexed text.
+- Record skipped files and reasons.
+- Reject oversized imports with an actionable message; never silently present an incomplete index as complete.
+- Read repository contents without installing dependencies or running repository code.
+- Keep provider credentials on the backend.
+4. Design requirements
+Create a professional developer workspace with enough information to be useful, without excessive visual decoration.
+Appearance
+- Dark theme by default; light theme toggle.
+- Slate backgrounds, subtle borders, blue primary actions.
+- Green for success, amber for uncertainty, red for errors.
+- Sans-serif interface text; monospace code and logs.
+- Moderate spacing and compact tables.
+- No gradients, glass effects, animated backgrounds, or decorative charts.
+- Short transitions only.
+- Keyboard-accessible forms, tabs, dialogs, and menus.
+- Status must use text and icons as well as color.
+Layout
+- Desktop sidebar: approximately 240 px.
+- Main content fills available width.
+- Investigation screen includes an approximately 300 px activity panel.
+- Below 1,024 px, activity moves beneath the main content.
+- On mobile, navigation becomes a drawer and evidence panels stack.
+5. Screens
+A. Dashboard — /
+Display:
+- App name and tagline.
+- Add repository and New investigation actions.
+- Counts of ready repositories, active indexing jobs, and investigations.
+- Recent repositories table.
+- Recent investigations table.
+Repository columns:
+- Name.
+- Branch.
+- Index status.
+- Indexed files.
+- Last indexed time.
+Investigation columns:
+- Title.
+- Repository.
+- Status.
+- Created time.
+Empty state: explain the first step and provide Add repository.
+Counts must come from persisted records.
+B. Repositories — /repositories
+Display a searchable repository list.
+Each row shows:
+- Owner/name.
+- GitHub link.
+- Branch.
+- Status.
+- Last indexed commit, abbreviated.
+- Last indexed time.
+Actions:
+- Open.
+- Reindex.
+- Delete, with confirmation.
+Deletion removes associated investigations, index records, vector points, and local checkout artifacts. Track cleanup failures rather than reporting false success.
+C. Add repository — /repositories/new
+Fields:
+Field	Validation
+GitHub URL	Required public HTTPS repository URL
+Branch	Optional; blank selects default branch
+Display name	Optional, maximum 100 characters
+
+
+Accept standard https://github.com/owner/repo URLs, including an optional .git suffix. Reject arbitrary hosts, embedded credentials, and malformed paths.
+After submission:
+- Create repository and index-job records.
+- Queue import.
+- Navigate to the repository detail page.
+- Show real progress.
+D. Repository detail — /repositories/[id]
+Show:
+- Repository name and GitHub link.
+- Selected branch.
+- Indexed commit SHA.
+- Index status and timestamps.
+- File/chunk counts.
+- Skipped-file summary.
+- Error details and retry action when applicable.
+- Searchable indexed-file list.
+- New investigation action, enabled when a usable index exists.
+Indexing stages:
+1. Queued.
+2. Fetching repository.
+3. Scanning files.
+4. Chunking.
+5. Embedding.
+6. Saving index.
+7. Ready or failed.
+Use stage labels and processed counts. Display percentages only when a real total is available.
+E. New investigation — /investigations/new
+Fields:
+Field	Validation
+Repository	Required; must have a ready index
+Title	Required, 5–120 characters
+Bug description	Required, 20–10,000 characters
+Expected behavior	Optional, maximum 5,000 characters
+Actual behavior	Optional, maximum 5,000 characters
+Stack trace/logs	Optional, maximum 20,000 characters
+
+
+Primary action: Find relevant code.
+On submission:
+- Pin the investigation to the repository’s current ready index.
+- Persist inputs.
+- Queue retrieval.
+- Open the investigation workspace.
+No attachments are required for P0.
+F. Investigation workspace — /investigations/[id]
+Header:
+- Title.
+- Repository and pinned commit.
+- Status.
+- Created time.
+- Retry retrieval when failed.
+- Export report when evidence is ready.
+Tabs:
+Overview
+- Original bug report.
+- Expected/actual behavior.
+- Submitted logs.
+- Retrieval outcome.
+- Explanation that retrieved files are candidates, not a verified root cause.
+Evidence
+- Ranked evidence list.
+- File path and line range.
+- Source type: code, test, or documentation.
+- Matching snippet.
+- Match reason: semantic similarity, exact symbol/text match, or both.
+- Click an item to open the file viewer and highlight its lines.
+- Link to GitHub at the pinned commit.
+Do not present similarity scores as probabilities that a file caused the bug.
+Activity
+- Timestamped indexing/retrieval events.
+- Real errors.
+- Retry events.
+Right-side panel:
+- Current stage.
+- Elapsed time.
+- Retrieved chunk count.
+- Index version.
+Show Changes and Tests as disabled future tabs with clear “Available in a later milestone” explanations.
+G. History — /investigations
+- Search by title.
+- Filter by repository and status.
+- Sort newest first.
+- Paginate.
+- Open an investigation.
+- Delete with confirmation.
+H. Settings — /settings
+- Theme preference.
+- Backend/database/vector-store/worker health.
+- Active embedding model and configured import limits.
+- Explain that backend configuration comes from environment variables.
+Theme is editable. Infrastructure configuration is read-only in P0.
+6. Data models
+Use UUID primary keys and UTC timestamps.
+Model	Required fields
+Repository	id, name, owner, github_url, branch, status, active_index_id, created_at, updated_at
+RepositoryIndex	id, repository_id, commit_sha, status, embedding_model, embedding_dimension, file_count, chunk_count, skipped_count, error_message, started_at, completed_at
+SourceFile	id, index_id, path, language, content_hash, content, line_count, indexing_status, skip_reason
+CodeChunk	id, source_file_id, index_id, start_line, end_line, symbol_name, content, vector_point_id
+Investigation	id, repository_id, index_id, title, description, expected_behavior, actual_behavior, logs, status, error_message, created_at, completed_at
+Evidence	id, investigation_id, chunk_id, rank, semantic_score, exact_match, match_reason
+ActivityEvent	id, repository_id nullable, investigation_id nullable, stage, level, message, created_at
+Job	id, kind, repository_id nullable, investigation_id nullable, status, attempt, error_message, started_at, completed_at
+
+
+Repository statuses: pending, indexing, ready, failed.
+Investigation statuses: queued, retrieving, evidence_ready, failed.
+Preserve old indexes while investigations reference them. Reindexing must not change historical evidence.
+7. Indexing and retrieval behavior
+Indexing
+- Fetch into an application-managed directory.
+- Resolve branch to an immutable commit.
+- Parse Python using AST where possible.
+- Prefer function/class chunks with surrounding context.
+- Split large chunks into bounded overlapping sections.
+- Fall back to line-based chunks on parsing errors.
+- Split documentation by headings, then bounded line sections.
+- Preserve accurate original line numbers.
+- Store vectors with repository_id, index_id, file_path, and chunk_id metadata.
+- Activate a new index only after indexing completes successfully.
+- A failed reindex keeps the previous ready index usable.
+Retrieval
+Build the query from the description, expected/actual behavior, and logs.
+1. Extract filenames and identifiers from the report.
+2. Search exact matches within the pinned index.
+3. Retrieve semantic candidates from Qdrant within that same index.
+4. Combine rankings using reciprocal rank fusion.
+5. Deduplicate chunks.
+6. Return up to 12 evidence items, with a maximum of three per file.
+7. Persist the evidence and ordering.
+An empty result is a valid outcome: show “No relevant evidence found” and allow the user to refine the report.
+P0 requires no generative LLM call. Its outputs must be backed by retrieved repository content.
+8. API contract
+All endpoints are under /api/v1.
+Method	Endpoint	Behavior
+GET	/health	Service health
+GET	/dashboard	Counts and recent records
+GET	/repositories	Searchable, paginated list
+POST	/repositories	Validate, persist, queue import; return 202
+GET	/repositories/{id}	Details and current indexing state
+DELETE	/repositories/{id}	Queue cleanup; return 202
+POST	/repositories/{id}/reindex	Queue new index; return 202
+GET	/repositories/{id}/files	Files for a specified/current index
+GET	/files/{id}	Stored content and metadata
+GET	/investigations	Search/filter/pagination
+POST	/investigations	Persist and queue retrieval; return 202
+GET	/investigations/{id}	Inputs, status, evidence summary
+GET	/investigations/{id}/evidence	Ranked evidence
+GET	/investigations/{id}/events	Timestamped activity
+POST	/investigations/{id}/retry	Retry failed retrieval
+GET	/investigations/{id}/report	Download Markdown report
+DELETE	/investigations/{id}	Delete investigation and related records
+
+
+List responses use {items, total, page, page_size}.
+Errors use {error: {code, message, field_errors?}}.
+Return appropriate 404, 409, and 422 responses. Poll active jobs every two seconds; stop polling when terminal. Persist jobs and mark interrupted work retriable after worker restart.
+9. Demo and setup
+Include a small bundled Python repository containing:
+- Application code.
+- pytest tests.
+- README.
+- A documented seeded login bug.
+Provide Load demo repository as an explicit action. It must run the same indexing and retrieval pipeline as imported repositories.
+Do not silently populate fake investigations or fabricate successful results.
+Deliver:
+- .env.example without secrets.
+- Database migrations.
+- Docker Compose with persistent volumes.
+- README with startup commands, first-run model download requirements, architecture, and troubleshooting.
+- Clear indication when required services are unavailable.
+10. Acceptance criteria
+P0 is complete when:
+1. The documented local startup process launches the frontend, backend, database, vector store, queue, and worker.
+2. The dashboard starts with an accurate empty state.
+3. A supported public repository can be imported and indexed at a stored commit SHA.
+4. Invalid/private/unavailable repository URLs produce actionable errors.
+5. Unsupported and oversized files are handled according to the stated limits.
+6. Refreshing during indexing preserves status and progress.
+7. A bug report produces persisted, repository-specific evidence.
+8. Evidence paths, snippets, and line ranges match stored source content.
+9. Evidence opens the correct file and immutable GitHub source link.
+10. Retrieval never returns evidence from another repository or index.
+11. Reindexing preserves historical investigations.
+12. An investigation can be reopened after restarting services.
+13. Report export contains the inputs, commit, evidence, and P0 limitations.
+14. Failures show useful retry actions and never appear as success.
+15. All primary controls work; future controls are visibly disabled.
+16. Desktop/mobile layouts and keyboard navigation are usable.
+17. Type checking, linting, backend tests, and the frontend production build pass.
+Include focused tests for URL validation, chunk line accuracy, index isolation, failed reindex behavior, and persisted investigation retrieval. Include one end-to-end demo flow.
+11. Implementation order
+1. Scaffold services, environment configuration, and database migrations.
+2. Build navigation, shared components, and empty states.
+3. Implement repository import and persistent indexing jobs.
+4. Implement source browsing and filtered retrieval.
+5. Implement investigation creation and evidence workspace.
+6. Add history, report export, settings, and demo loading.
+7. Verify acceptance criteria and document remaining limitations.
+Build P0 end to end. Mark it complete only after repository indexing and evidence retrieval work against real source files.
