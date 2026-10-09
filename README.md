@@ -1,210 +1,161 @@
 # BugTime AI
 
-**Trace the bug. Find the breaking commit. Verify the fix. Publish a draft PR.**
+**Trace the bug. Find the breaking commit. Verify the fix. Open a draft PR.**
 
-BugTime AI is an investigation workspace for real software bugs. You pin a repository at a commit, retrieve likely code, reproduce the failure with the project’s own pytest suite, locate the introducing commit, generate a focused patch with a model, verify it in a disposable sandbox, then optionally open a **draft** pull request on GitHub — with local BugTime evidence clearly separated from CI.
+BugTime AI is an investigation workspace for real software failures. Instead of jumping straight to an AI-generated patch, it walks you through a trustworthy chain: find the relevant code, prove the bug with the project’s own tests, locate when it was introduced, verify a fix in a sandbox, and only then publish a draft pull request.
 
-| Milestone | What you get |
+---
+
+## What it does
+
+When something is broken in a Python/pytest codebase, BugTime helps you answer four hard questions:
+
+1. **Where should I look?** — Index a repository at a pinned commit and retrieve the most relevant files and symbols for the bug report.
+2. **Can I reproduce it?** — Discover and run the repo’s existing tests in a disposable, locked-down container. Confirm the failure matches the bug you care about.
+3. **When did it break?** — Search history with a frozen reproduction (same tests, same environment) and verify the introducing commit — not a guess from the commit message.
+4. **Does this patch actually fix it?** — Propose a focused change with a model, re-run the reproduction and suite, review the exact patch by hash, then optionally open a **draft** GitHub PR with evidence and limitations spelled out.
+
+Local BugTime results are always labeled as **BugTime verification**, not as GitHub CI.
+
+---
+
+## Who it’s for
+
+Developers and teams who want AI assistance that stays grounded in:
+
+- a **pinned** repository revision  
+- **real** project tests  
+- an **auditable** trail from evidence → reproduction → boundary → fix → draft PR  
+
+It is not a generic “chat and hope” coding agent. Publishing stays blocked until the patch is verified and explicitly accepted.
+
+---
+
+## Product surface
+
+| Area | Role |
 | --- | --- |
-| **P0** | Import a public GitHub repo, index a pinned commit, retrieve evidence |
-| **P1** | Discover and run existing pytest tests in a locked-down sandbox; confirm reproduction |
-| **P2** | Find and verify the breaking commit (frozen reproduction + linear bisect) |
-| **P3** | Propose a focused patch, re-run reproduction + suite, accept/reject by patch hash |
-| **P4** | Optional retrieval reranker (base or fine-tuned) — **experimental** |
-| **P5** | Preview and publish a **draft** PR from an accepted `verified_fix` |
+| **Repositories** | Import a public GitHub repo (or load the built-in login-regression demo) and index it |
+| **Investigations** | Capture the bug: title, description, expected vs actual behavior |
+| **Evidence** | Ranked code snippets tied to the pinned commit |
+| **Tests** | Discover pytest nodes, run reproduction, confirm the failure |
+| **Commits** | Find and verify the breaking commit on linear history |
+| **Changes** | Generate, validate, and accept/reject a verified patch; prepare a draft PR |
+| **Settings** | Service health and GitHub connection status (token never shown in the UI) |
 
 ---
 
-## Why it exists
-
-Most “AI fix” tools jump straight to a patch. BugTime insists on a chain of custody:
-
-1. **Evidence** at a pinned SHA  
-2. **Reproduction** with the repo’s real tests  
-3. **Boundary** — which commit introduced the failure  
-4. **Verified fix** — same frozen tests pass after the patch  
-5. **Draft PR** — only the reviewed bytes, with limitations spelled out  
-
-If any link is missing, publishing stays disabled.
-
----
-
-## Architecture
+## How a case flows
 
 ```
-browser → frontend:3000 → backend:8000 → postgres / qdrant
-                              ↓
-                     redis ← worker (index / retrieve)
-                              ↓
-                     redis ← executor → disposable pytest containers
-                              ↓
-                     GitHub API (P5 draft PRs; token stays server-side)
+Import & index → Investigate → Evidence → Reproduce → Breaking commit
+        → Generate & verify fix → Accept patch → Draft PR (optional)
 ```
 
-| Layer | Stack |
-| --- | --- |
-| Frontend | Next.js App Router, React, TypeScript, Tailwind, Monaco |
-| Backend | FastAPI, SQLAlchemy, Alembic |
-| Jobs | Redis + RQ (`worker` for index; `executor` for tests/repair) |
-| Vector store | Qdrant (filtered by `repository_id` + `index_id`) |
-| Sandbox | `bugtime-pytest-runner` — no network, 1 CPU, 1 GB, timeout |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
-| Models | OpenAI-compatible API **or** local Ollama |
+Each stage leaves records you can revisit. A draft PR is allowed only when:
 
-Only the **executor** mounts the Docker socket. Sandbox containers never see app secrets, the GitHub token, or the socket.
+- the repair outcome is a **verified fix**  
+- you accepted that **exact** patch hash  
+- the destination repo matches the investigation  
+
+If the target branch moved past the verified commit, BugTime marks the proposal stale and asks you to revalidate — it does not quietly reuse the old claim.
 
 ---
 
-## Quick start
+## Architecture (at a glance)
 
-**Requirements:** Docker Desktop (or Engine + Compose v2), ~4 GB free RAM for the first embedding download.
+| Layer | Technology |
+| --- | --- |
+| UI | Next.js, React, TypeScript |
+| API | FastAPI |
+| Data | PostgreSQL + Qdrant (vectors) |
+| Jobs | Redis + RQ (`worker` for indexing, `executor` for tests/repair) |
+| Sandbox | Dedicated pytest image: no network, CPU/memory/time limits |
+| Models | OpenAI-compatible API or local Ollama |
+| Publishing | Server-side GitHub token → draft PRs only |
+
+```
+Browser → Frontend → Backend → Postgres / Qdrant
+                        ↓
+              Redis → worker (index / retrieve)
+                        ↓
+              Redis → executor → disposable test containers
+                        ↓
+              GitHub API (optional draft PRs)
+```
+
+Sandbox containers never receive the Docker socket, app secrets, or the GitHub token.
+
+---
+
+## Built-in demo
+
+The repo includes a small **login regression** fixture (`demo-repo-v2`): mixed-case usernames stop authenticating after a bad change to username normalization. Use **Load demo repository** in the UI to try the full investigation loop without importing an external project.
+
+After cloning this repository, restore the fixture’s git history once:
+
+```bash
+./scripts/restore-demo-fixture.sh
+```
+
+---
+
+## Run locally
+
+**Needs:** Docker Desktop (or Engine + Compose v2), ~4 GB RAM for the first embedding download.
 
 ```bash
 git clone https://github.com/Sanjanabonagiri16/bugtime-ai.git
 cd bugtime-ai
 cp .env.example .env
-
-# Restore the demo fixture’s git history (needed for P2 bisect)
 ./scripts/restore-demo-fixture.sh
-
-# Pytest sandbox image
 docker build -t bugtime-pytest-runner:latest ./runner
-
-# Stack
 docker compose up --build -d
 ```
 
-| Service | URL |
-| --- | --- |
-| App | http://localhost:3000 |
-| API health | http://localhost:8000/api/v1/health |
-| Qdrant | http://localhost:6333 |
+- App: http://localhost:3000  
+- API health: http://localhost:8000/api/v1/health  
 
-### Optional: local model (no cloud credits)
+Optional `.env` knobs (see `.env.example`):
 
-```env
-MODEL_PROVIDER=ollama
-MODEL_API_KEY=ollama
-MODEL_NAME=qwen2.5-coder:3b
-MODEL_BASE_URL=http://host.docker.internal:11434/v1
-```
-
-### Optional: draft PRs (P5)
-
-Create a **fine-grained** GitHub PAT for the target repo only:
-
-- **Contents:** Read and write  
-- **Pull requests:** Read and write  
-
-```env
-GITHUB_TOKEN=...
-```
-
-Then recreate the API:
-
-```bash
-docker compose up -d --build backend
-```
-
-Check **Settings → GitHub** (status only — the token is never returned to the browser). Preview never creates remotes; **Create draft PR** does.
+- **`MODEL_*`** — cloud or Ollama for fix generation  
+- **`GITHUB_TOKEN`** — fine-grained PAT (Contents + Pull requests) for draft PRs  
+- **`RERANKER_MODE`** — evidence reranking; default is off  
 
 ---
 
-## Demo walkthrough (login regression)
+## Optional capabilities
 
-1. **Repositories → Load demo repository** (`demo-login-bug-v2`)  
-2. Wait until the index is **Ready**  
-3. **New investigation** — mixed-case login fails (`Alice` vs `alice`)  
-4. **Evidence** — expect `app/auth.py` / `tests/test_auth.py`  
-5. **Tests → Discover** → run `tests/test_auth.py::test_login_mixed_case_should_succeed`  
-6. Confirm the failure matches the bug  
-7. **Commits → Find breaking commit** (pick an early good SHA)  
-8. **Changes → Generate fix** → accept a **Verified fix**  
-9. **Prepare draft PR** → review title/body → **Create draft PR** (needs `GITHUB_TOKEN` + a writable GitHub copy of the demo if you want a live PR)
+**Retrieval reranker (experimental).**  
+BugTime can rerank evidence with a cross-encoder (`base` or a fine-tuned checkpoint). Fine-tuning / SWE-bench pilot work is **experimental** — useful for research notes, not a claim of production-grade generalization. Default installs leave the reranker disabled.
 
-Passing selected tests means those tests passed — not “no bug exists.” P2 assumes a single introduction on a **linear** history.
+**Draft PR publishing.**  
+From an accepted verified fix, prepare a preview (no remote side effects), edit title/body, then create a draft PR on an explicit action. Retries are idempotent; force-push and auto-merge are out of scope.
 
 ---
 
-## P4 reranker (experimental)
+## What it deliberately does not do
 
-P4 adds an optional cross-encoder reranker for evidence ranking (`RERANKER_MODE=disabled|base|finetuned`).
-
-Fine-tuning and SWE-bench pilot results are **experimental**. They do **not** claim production-grade generalization. Treat held-out metrics as research notes, not product guarantees. The default deployment keeps the reranker **disabled**.
-
----
-
-## P5 publishing rules
-
-- Eligible only for an **accepted** patch whose hash matches a **verified_fix**  
-- Preview is local; publish creates a feature branch + **draft** PR (no force-push, no auto-merge)  
-- If `main` moved past the verified SHA → **stale_base** → revalidate (old verification is not transferred)  
-- Idempotent retries return the same publication when possible  
-- PR body labels results as **BugTime verification**, not GitHub Actions/CI  
-
----
-
-## Configuration highlights
-
-| Variable | Purpose |
-| --- | --- |
-| `MODEL_*` | Repair model (OpenAI-compatible or Ollama) |
-| `GITHUB_TOKEN` | Server-side draft PR publishing (optional) |
-| `RUNNER_IMAGE` | Pytest sandbox image |
-| `RERANKER_MODE` | `disabled` (default) / `base` / `finetuned` |
-| `EXECUTION_TIMEOUT_SECONDS` | Sandbox timeout (default `120`) |
-
-See `.env.example` for the full list. Never commit `.env`.
+- Invent reproduction tests instead of using the repo’s suite  
+- Treat model similarity scores as root-cause certainty  
+- Bisect merge-heavy histories in the current commit search  
+- Push or merge for you — drafts only, after human accept  
+- Put credentials in the browser, logs, clone URLs, or sandboxes  
 
 ---
 
 ## Project layout
 
 ```
-backend/           FastAPI, RQ workers, Alembic, tests
-frontend/          Next.js UI
-runner/            Disposable pytest image
-demo-repo-v2/      Login regression fixture (restore history via script)
-demo-repo-v2.bundle  Full git history for the fixture
-dev/               Milestone notes / screenshots specs
+backend/     API, workers, migrations, tests
+frontend/    Investigation UI
+runner/      Pytest sandbox image
+demo-repo-v2/   Demo fixture (history via bundle + restore script)
 docker-compose.yml
 ```
 
 ---
 
-## Tests
+## License
 
-```bash
-cd backend && pytest -q
-cd frontend && npm ci && npm run lint && npm run build
-```
-
----
-
-## Troubleshooting
-
-| Symptom | Check |
-| --- | --- |
-| UI can’t reach API | `docker compose ps`, `/api/v1/health` |
-| Discover/run image errors | `docker images \| grep bugtime-pytest-runner`; rebuild `./runner` |
-| Executor can’t start containers | Docker socket on `executor`; Desktop running |
-| Demo bisect missing SHAs | Run `./scripts/restore-demo-fixture.sh` |
-| Draft PR disabled | Accept a `verified_fix`; set `GITHUB_TOKEN`; repo must be the real GitHub identity |
-| GitHub status failed | Fine-grained PAT scopes; recreate `backend` after editing `.env` |
-
----
-
-## Honest limits
-
-- Public GitHub HTTPS imports (and the built-in demo); not a general private-SCM suite yet  
-- Pytest + existing tests only for reproduction  
-- Linear history for bisect; merges unsupported in P2  
-- One model provider at a time; patch attempts are budgeted  
-- Fork publishing and auto-merge are out of scope  
-- P4 fine-tuning remains **experimental**
-
----
-
-## License / authorship
-
-Built as a milestone product (P0–P5). Replace this section with your preferred license before a public release if needed.
+Add your preferred license before a wider release if needed.
