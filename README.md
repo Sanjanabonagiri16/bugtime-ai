@@ -47,9 +47,17 @@ It is not a generic “chat and hope” coding agent. Publishing stays blocked u
 
 ## How a case flows
 
-```
-Import & index → Investigate → Evidence → Reproduce → Breaking commit
-        → Generate & verify fix → Accept patch → Draft PR (optional)
+```mermaid
+flowchart LR
+  A[Import & index] --> B[Investigation]
+  B --> C[Evidence]
+  C --> D[Reproduce]
+  D --> E[Breaking commit]
+  E --> F[Generate & verify fix]
+  F --> G{Accepted?}
+  G -->|Yes| H[Draft PR preview]
+  G -->|No| F
+  H --> I[Create draft PR]
 ```
 
 Each stage leaves records you can revisit. A draft PR is allowed only when:
@@ -59,6 +67,20 @@ Each stage leaves records you can revisit. A draft PR is allowed only when:
 - the destination repo matches the investigation  
 
 If the target branch moved past the verified commit, BugTime marks the proposal stale and asks you to revalidate — it does not quietly reuse the old claim.
+
+```mermaid
+flowchart TD
+  P[Prepare draft PR] --> Q{Base SHA still matches?}
+  Q -->|Yes| R[Ready to publish]
+  Q -->|No| S[stale_base]
+  S --> T[Revalidate on current tip]
+  T --> U{Patch applies & still valid?}
+  U -->|Yes| V[New verification record]
+  U -->|Conflict / bug gone| W[Report outcome — no transfer of old claim]
+  V --> R
+  R --> X[Create draft PR]
+  X --> Y[Read back: draft, head SHA, URL]
+```
 
 ---
 
@@ -74,17 +96,49 @@ If the target branch moved past the verified commit, BugTime marks the proposal 
 | Models | OpenAI-compatible API or local Ollama |
 | Publishing | Server-side GitHub token → draft PRs only |
 
-```
-Browser → Frontend → Backend → Postgres / Qdrant
-                        ↓
-              Redis → worker (index / retrieve)
-                        ↓
-              Redis → executor → disposable test containers
-                        ↓
-              GitHub API (optional draft PRs)
+```mermaid
+flowchart TB
+  subgraph Client
+    UI[Frontend :3000]
+  end
+  subgraph Platform
+    API[Backend :8000]
+    PG[(PostgreSQL)]
+    QD[(Qdrant)]
+    RD[(Redis)]
+    W[Index worker]
+    X[Executor worker]
+    SB[Pytest sandbox containers]
+  end
+  subgraph External
+    GH[GitHub API]
+    MD[Model API / Ollama]
+  end
+  UI --> API
+  API --> PG
+  API --> QD
+  API --> RD
+  RD --> W
+  RD --> X
+  X --> SB
+  API --> GH
+  X --> MD
 ```
 
 Sandbox containers never receive the Docker socket, app secrets, or the GitHub token.
+
+### UI map
+
+```mermaid
+flowchart LR
+  Dash[Dashboard] --> Inv[Investigation workspace]
+  Inv --> Ev[Evidence]
+  Inv --> Te[Tests]
+  Inv --> Co[Commits]
+  Inv --> Ch[Changes]
+  Repos[Repositories] --> Inv
+  Set[Settings] --> GHStatus[GitHub status]
+```
 
 ---
 
